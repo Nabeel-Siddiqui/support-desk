@@ -20,6 +20,12 @@ defmodule SupportDeskWeb.Router do
     get "/", PageController, :home
   end
 
+  scope "/webhooks", SupportDeskWeb do
+    pipe_through :api
+
+    post "/inbound", WebhookController, :inbound
+  end
+
   # Other scopes may use custom stacks.
   # scope "/api", SupportDeskWeb do
   #   pipe_through :api
