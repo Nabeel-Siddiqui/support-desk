@@ -18,6 +18,9 @@ defmodule SupportDeskWeb.Router do
     pipe_through :browser
 
     get "/", PageController, :home
+
+    live "/tickets", TicketLive.Index, :index
+    live "/tickets/:id", TicketLive.Show, :show
   end
 
   scope "/webhooks", SupportDeskWeb do

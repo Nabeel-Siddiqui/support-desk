@@ -7,6 +7,8 @@ defmodule SupportDesk.Tickets do
 
   require Logger
 
+  import Ecto.Query
+
   alias SupportDesk.Repo
   alias SupportDesk.Tickets.{AI, Matcher, Triage, Ticket}
 
@@ -16,6 +18,14 @@ defmodule SupportDesk.Tickets do
     |> Ticket.intake_changeset(attrs)
     |> Repo.insert()
   end
+
+  @doc "Lists tickets, most recent first, for the ticket dashboard."
+  def list_tickets do
+    Repo.all(from t in Ticket, order_by: [desc: t.inserted_at])
+  end
+
+  @doc "Gets a single ticket by id, raising if it doesn't exist."
+  def get_ticket!(id), do: Repo.get!(Ticket, id)
 
   @doc """
   Runs a ticket through analyze -> match -> triage, saving results back
