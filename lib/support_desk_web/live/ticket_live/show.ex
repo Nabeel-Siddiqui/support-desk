@@ -10,8 +10,14 @@ defmodule SupportDeskWeb.TicketLive.Show do
 
   @impl true
   def handle_params(%{"id" => id}, _uri, socket) do
-    {:noreply, assign(socket, :ticket, Tickets.get_ticket!(id))}
+    {:noreply,
+     socket
+     |> assign(:page_title, page_title(socket.assigns.live_action))
+     |> assign(:ticket, Tickets.get_ticket!(id))}
   end
+
+  defp page_title(:show), do: "Show Ticket"
+  defp page_title(:edit), do: "Edit Ticket"
 
   @impl true
   def render(assigns) do
@@ -20,6 +26,18 @@ defmodule SupportDeskWeb.TicketLive.Show do
       Ticket #{@ticket.id}
       <:subtitle>{@ticket.subject}</:subtitle>
       <:actions>
+        <.link patch={~p"/tickets/#{@ticket}/show/edit"}>
+          <.button>Edit</.button>
+        </.link>
+        <.button :if={resolvable?(@ticket)} phx-click="resolve">Resolve</.button>
+        <.button :if={@ticket.status == :resolved} phx-click="reopen">Reopen</.button>
+        <.button
+          phx-click="delete"
+          data-confirm="Delete this ticket? This cannot be undone."
+          class="bg-red-600 hover:bg-red-500"
+        >
+          Delete
+        </.button>
         <.back navigate={~p"/tickets"}>Back to tickets</.back>
       </:actions>
     </.header>
@@ -57,6 +75,49 @@ defmodule SupportDeskWeb.TicketLive.Show do
       <:item title="Priority">{@ticket.priority || "—"}</:item>
       <:item title="Reason">{@ticket.routing_reason || "—"}</:item>
     </.list>
+
+    <.modal
+      :if={@live_action == :edit}
+      id="ticket-modal"
+      show
+      on_cancel={JS.patch(~p"/tickets/#{@ticket}")}
+    >
+      <.live_component
+        module={SupportDeskWeb.TicketLive.FormComponent}
+        id={@ticket.id}
+        title={@page_title}
+        action={@live_action}
+        ticket={@ticket}
+        patch={~p"/tickets/#{@ticket}"}
+      />
+    </.modal>
     """
   end
+
+  @impl true
+  def handle_info({SupportDeskWeb.TicketLive.FormComponent, {:saved, ticket}}, socket) do
+    {:noreply, assign(socket, :ticket, ticket)}
+  end
+
+  @impl true
+  def handle_event("resolve", _params, socket) do
+    {:ok, ticket} = Tickets.resolve_ticket(socket.assigns.ticket)
+    {:noreply, assign(socket, :ticket, ticket)}
+  end
+
+  def handle_event("reopen", _params, socket) do
+    {:ok, ticket} = Tickets.reopen_ticket(socket.assigns.ticket)
+    {:noreply, assign(socket, :ticket, ticket)}
+  end
+
+  def handle_event("delete", _params, socket) do
+    {:ok, _} = Tickets.delete_ticket(socket.assigns.ticket)
+
+    {:noreply,
+     socket
+     |> put_flash(:info, "Ticket deleted")
+     |> push_navigate(to: ~p"/tickets")}
+  end
+
+  defp resolvable?(t), do: t.status not in [:resolved, :failed]
 end

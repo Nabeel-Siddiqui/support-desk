@@ -27,6 +27,59 @@ defmodule SupportDesk.Tickets do
   @doc "Gets a single ticket by id, raising if it doesn't exist."
   def get_ticket!(id), do: Repo.get!(Ticket, id)
 
+  @doc "Ticket counts grouped by status, for the home dashboard."
+  def ticket_counts do
+    Ticket
+    |> group_by([t], t.status)
+    |> select([t], {t.status, count(t.id)})
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  @doc "An empty/prefilled changeset for the 'new ticket' form."
+  def change_new_ticket(%Ticket{} = ticket \\ %Ticket{}, attrs \\ %{}) do
+    Ticket.intake_changeset(ticket, attrs)
+  end
+
+  @doc "A changeset for the 'edit ticket' form (intake + triage fields)."
+  def change_edit_ticket(%Ticket{} = ticket, attrs \\ %{}) do
+    Ticket.edit_changeset(ticket, attrs)
+  end
+
+  @doc """
+  Manually adds a ticket (e.g. from the UI, rather than a webhook) and runs
+  it through the same analyze -> match -> triage pipeline.
+  """
+  def add_ticket(attrs) do
+    with {:ok, ticket} <- create(attrs) do
+      process(ticket)
+    end
+  end
+
+  @doc "Updates a ticket's intake and/or triage fields directly."
+  def update_ticket(%Ticket{} = ticket, attrs) do
+    ticket
+    |> Ticket.edit_changeset(attrs)
+    |> Repo.update()
+  end
+
+  @doc "Deletes a ticket."
+  def delete_ticket(%Ticket{} = ticket), do: Repo.delete(ticket)
+
+  @doc "Marks a ticket as resolved by a human."
+  def resolve_ticket(%Ticket{} = ticket) do
+    ticket
+    |> Ticket.triage_changeset(%{status: :resolved, routing_reason: "Manually resolved"})
+    |> Repo.update()
+  end
+
+  @doc "Reopens a resolved/closed ticket, sending it back to :new."
+  def reopen_ticket(%Ticket{} = ticket) do
+    ticket
+    |> Ticket.triage_changeset(%{status: :new, routing_reason: "Reopened"})
+    |> Repo.update()
+  end
+
   @doc """
   Runs a ticket through analyze -> match -> triage, saving results back
   onto the row after each step. If any step raises, the ticket is marked

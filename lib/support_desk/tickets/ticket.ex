@@ -2,7 +2,7 @@ defmodule SupportDesk.Tickets.Ticket do
   use Ecto.Schema
   import Ecto.Changeset
 
-  @statuses ~w(new processing auto_resolved routed escalated failed)a
+  @statuses ~w(new processing auto_resolved routed escalated resolved failed)a
 
   schema "tickets" do
     # Intake
@@ -60,5 +60,13 @@ defmodule SupportDesk.Tickets.Ticket do
 
   def failed_changeset(ticket) do
     change(ticket, status: :failed)
+  end
+
+  @doc "Full manual edit: intake fields plus the human-editable triage fields."
+  def edit_changeset(ticket, attrs) do
+    ticket
+    |> cast(attrs, @intake_fields ++ @triage_fields)
+    |> validate_required([:channel, :from_email])
+    |> unique_constraint(:external_id)
   end
 end

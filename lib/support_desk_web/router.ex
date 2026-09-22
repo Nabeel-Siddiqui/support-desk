@@ -17,10 +17,14 @@ defmodule SupportDeskWeb.Router do
   scope "/", SupportDeskWeb do
     pipe_through :browser
 
-    get "/", PageController, :home
+    live "/", HomeLive, :index
 
     live "/tickets", TicketLive.Index, :index
+    live "/tickets/new", TicketLive.Index, :new
+    live "/tickets/:id/edit", TicketLive.Index, :edit
+
     live "/tickets/:id", TicketLive.Show, :show
+    live "/tickets/:id/show/edit", TicketLive.Show, :edit
   end
 
   scope "/webhooks", SupportDeskWeb do
