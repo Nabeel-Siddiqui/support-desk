@@ -11,6 +11,10 @@ config :support_desk,
   ecto_repos: [SupportDesk.Repo],
   generators: [timestamp_type: :utc_datetime]
 
+# Ticket pipeline: off by default (and in test), so it always runs the
+# deterministic keyword fallback instead of calling out to Claude.
+config :support_desk, ai_enabled: false
+
 # Configures the endpoint
 config :support_desk, SupportDeskWeb.Endpoint,
   url: [host: "localhost"],
