@@ -96,13 +96,17 @@ defmodule SupportDesk.Tickets.AI do
 
     req =
       Req.new(
-        base_url: @api_url,
+        url: @api_url,
         headers: [
           {"x-api-key", api_key()},
           {"anthropic-version", @anthropic_version}
         ],
         json: request_body,
-        receive_timeout: 15_000
+        receive_timeout: 15_000,
+        # Retries connection errors, timeouts, 429s, and 5xxs with backoff —
+        # a single Claude request timing out shouldn't fail the whole ticket.
+        retry: :transient,
+        max_retries: 2
       )
 
     case Req.post(req) do

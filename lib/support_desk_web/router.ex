@@ -8,10 +8,22 @@ defmodule SupportDeskWeb.Router do
     plug :put_root_layout, html: {SupportDeskWeb.Layouts, :root}
     plug :protect_from_forgery
     plug :put_secure_browser_headers
+    # This is an internal admin tool, not a public app — gate the whole
+    # browser UI behind a shared credential. Swap for a real accounts
+    # system (e.g. mix phx.gen.auth) if you need per-person attribution.
+    plug :admin_auth
   end
 
   pipeline :api do
     plug :accepts, ["json"]
+  end
+
+  pipeline :webhook do
+    plug SupportDeskWeb.Plugs.VerifyWebhookSecret
+  end
+
+  defp admin_auth(conn, _opts) do
+    Plug.BasicAuth.basic_auth(conn, Application.fetch_env!(:support_desk, :admin_auth))
   end
 
   scope "/", SupportDeskWeb do
@@ -28,7 +40,7 @@ defmodule SupportDeskWeb.Router do
   end
 
   scope "/webhooks", SupportDeskWeb do
-    pipe_through :api
+    pipe_through [:api, :webhook]
 
     post "/inbound", WebhookController, :inbound
   end

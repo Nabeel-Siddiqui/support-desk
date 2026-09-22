@@ -1,33 +1,97 @@
 defmodule SupportDesk.Tickets do
   @moduledoc """
-  Support ticket pipeline: a webhook payload comes in, gets saved as a
-  ticket, then runs through analyze -> match -> triage, with results saved
-  back onto the same row.
+  Public context for ticket CRUD and queries. Business-process
+  orchestration (the analyze -> match -> triage pipeline) lives in
+  `SupportDesk.Tickets.Pipeline` — kept separate so this module stays a
+  straightforward admin-CRUD surface instead of accumulating both
+  responsibilities.
   """
-
-  require Logger
 
   import Ecto.Query
 
   alias SupportDesk.Repo
-  alias SupportDesk.Tickets.{AI, Matcher, Triage, Ticket}
+  alias SupportDesk.Tickets.{Pipeline, Ticket}
 
-  @doc "Saves the raw intake fields as a new ticket, status :new."
+  @doc "Saves the raw intake fields as a new ticket, status :new, without processing it."
+  @spec create(map()) :: {:ok, Ticket.t()} | {:error, Ecto.Changeset.t()}
   def create(attrs) do
     %Ticket{}
     |> Ticket.intake_changeset(attrs)
     |> Repo.insert()
   end
 
-  @doc "Lists tickets, most recent first, for the ticket dashboard."
-  def list_tickets do
-    Repo.all(from t in Ticket, order_by: [desc: t.inserted_at])
+  @doc "Lists tickets, most recent first."
+  @spec list_tickets() :: [Ticket.t()]
+  def list_tickets, do: Repo.all(from t in Ticket, order_by: [desc: t.inserted_at])
+
+  @doc """
+  Lists tickets matching the given filters, most recent first, with
+  pagination.
+
+  Options:
+    * `:status` - restrict to a single status atom, or `nil` for all
+    * `:search` - case-insensitive match against subject, from_name, or from_email
+    * `:page` - 1-indexed page number (default 1)
+    * `:page_size` - rows per page (default 25)
+
+  Returns `%{tickets: [...], page: integer, page_size: integer, total_count: integer, total_pages: integer}`.
+  """
+  @spec list_tickets(map()) :: %{
+          tickets: [Ticket.t()],
+          page: pos_integer(),
+          page_size: pos_integer(),
+          total_count: non_neg_integer(),
+          total_pages: non_neg_integer()
+        }
+  def list_tickets(opts) when is_map(opts) do
+    page = max(Map.get(opts, :page, 1), 1)
+    page_size = Map.get(opts, :page_size, 25)
+
+    base_query =
+      Ticket
+      |> filter_by_status(Map.get(opts, :status))
+      |> filter_by_search(Map.get(opts, :search))
+
+    total_count = Repo.aggregate(base_query, :count, :id)
+    total_pages = max(ceil(total_count / page_size), 1)
+
+    tickets =
+      base_query
+      |> order_by([t], desc: t.inserted_at)
+      |> limit(^page_size)
+      |> offset(^((page - 1) * page_size))
+      |> Repo.all()
+
+    %{
+      tickets: tickets,
+      page: page,
+      page_size: page_size,
+      total_count: total_count,
+      total_pages: total_pages
+    }
   end
 
+  defp filter_by_status(query, nil), do: query
+  defp filter_by_status(query, status), do: where(query, [t], t.status == ^status)
+
+  defp filter_by_search(query, search) when is_binary(search) and search != "" do
+    pattern = "%#{search}%"
+
+    where(
+      query,
+      [t],
+      ilike(t.subject, ^pattern) or ilike(t.from_name, ^pattern) or ilike(t.from_email, ^pattern)
+    )
+  end
+
+  defp filter_by_search(query, _search), do: query
+
   @doc "Gets a single ticket by id, raising if it doesn't exist."
+  @spec get_ticket!(term()) :: Ticket.t()
   def get_ticket!(id), do: Repo.get!(Ticket, id)
 
   @doc "Ticket counts grouped by status, for the home dashboard."
+  @spec ticket_counts() :: %{atom() => non_neg_integer()}
   def ticket_counts do
     Ticket
     |> group_by([t], t.status)
@@ -37,11 +101,13 @@ defmodule SupportDesk.Tickets do
   end
 
   @doc "An empty/prefilled changeset for the 'new ticket' form."
+  @spec change_new_ticket(Ticket.t(), map()) :: Ecto.Changeset.t()
   def change_new_ticket(%Ticket{} = ticket \\ %Ticket{}, attrs \\ %{}) do
     Ticket.intake_changeset(ticket, attrs)
   end
 
   @doc "A changeset for the 'edit ticket' form (intake + triage fields)."
+  @spec change_edit_ticket(Ticket.t(), map()) :: Ecto.Changeset.t()
   def change_edit_ticket(%Ticket{} = ticket, attrs \\ %{}) do
     Ticket.edit_changeset(ticket, attrs)
   end
@@ -50,13 +116,26 @@ defmodule SupportDesk.Tickets do
   Manually adds a ticket (e.g. from the UI, rather than a webhook) and runs
   it through the same analyze -> match -> triage pipeline.
   """
+  @spec add_ticket(map()) :: {:ok, Ticket.t()} | {:error, Ecto.Changeset.t()}
   def add_ticket(attrs) do
     with {:ok, ticket} <- create(attrs) do
-      process(ticket)
+      Pipeline.process(ticket)
     end
   end
 
+  @doc """
+  Creates a ticket from a webhook payload and runs it through the pipeline.
+  See `SupportDesk.Tickets.Pipeline.receive/1`.
+  """
+  @spec receive(map()) :: {:ok, Ticket.t() | :duplicate} | {:error, Ecto.Changeset.t()}
+  defdelegate receive(attrs), to: Pipeline
+
+  @doc "Re-runs the pipeline on an already-created ticket."
+  @spec process(Ticket.t()) :: {:ok, Ticket.t()} | {:error, Ecto.Changeset.t()}
+  defdelegate process(ticket), to: Pipeline
+
   @doc "Updates a ticket's intake and/or triage fields directly."
+  @spec update_ticket(Ticket.t(), map()) :: {:ok, Ticket.t()} | {:error, Ecto.Changeset.t()}
   def update_ticket(%Ticket{} = ticket, attrs) do
     ticket
     |> Ticket.edit_changeset(attrs)
@@ -64,9 +143,11 @@ defmodule SupportDesk.Tickets do
   end
 
   @doc "Deletes a ticket."
+  @spec delete_ticket(Ticket.t()) :: {:ok, Ticket.t()} | {:error, Ecto.Changeset.t()}
   def delete_ticket(%Ticket{} = ticket), do: Repo.delete(ticket)
 
   @doc "Marks a ticket as resolved by a human."
+  @spec resolve_ticket(Ticket.t()) :: {:ok, Ticket.t()} | {:error, Ecto.Changeset.t()}
   def resolve_ticket(%Ticket{} = ticket) do
     ticket
     |> Ticket.triage_changeset(%{status: :resolved, routing_reason: "Manually resolved"})
@@ -74,124 +155,10 @@ defmodule SupportDesk.Tickets do
   end
 
   @doc "Reopens a resolved/closed ticket, sending it back to :new."
+  @spec reopen_ticket(Ticket.t()) :: {:ok, Ticket.t()} | {:error, Ecto.Changeset.t()}
   def reopen_ticket(%Ticket{} = ticket) do
     ticket
     |> Ticket.triage_changeset(%{status: :new, routing_reason: "Reopened"})
-    |> Repo.update()
-  end
-
-  @doc """
-  Runs a ticket through analyze -> match -> triage, saving results back
-  onto the row after each step. If any step raises, the ticket is marked
-  :failed instead of crashing the caller.
-  """
-  def process(%Ticket{} = ticket) do
-    with {:ok, ticket} <- mark_processing(ticket),
-         {:ok, ticket} <- run_analysis(ticket),
-         {:ok, ticket} <- run_matching(ticket),
-         {:ok, ticket} <- run_triage(ticket) do
-      {:ok, ticket}
-    end
-  rescue
-    exception ->
-      Logger.error(
-        "SupportDesk.Tickets.process/1 failed for ticket #{ticket.id}: " <>
-          Exception.format(:error, exception, __STACKTRACE__)
-      )
-
-      mark_failed(ticket)
-  end
-
-  @doc """
-  Creates a ticket from a webhook payload and immediately processes it.
-  A duplicate `external_id` (the webhook redelivering the same message) is
-  treated as success rather than an error.
-  """
-  def receive(attrs) do
-    case create(attrs) do
-      {:ok, ticket} ->
-        process(ticket)
-
-      {:error, changeset} ->
-        if duplicate_external_id?(changeset) do
-          {:ok, :duplicate}
-        else
-          {:error, changeset}
-        end
-    end
-  end
-
-  defp duplicate_external_id?(%Ecto.Changeset{errors: errors}) do
-    Enum.any?(errors, fn
-      {:external_id, {_msg, opts}} -> Keyword.get(opts, :constraint) == :unique
-      _ -> false
-    end)
-  end
-
-  defp mark_processing(ticket) do
-    ticket
-    |> Ticket.triage_changeset(%{status: :processing})
-    |> Repo.update()
-  end
-
-  defp run_analysis(ticket) do
-    result = AI.analyze(ticket)
-
-    ticket
-    |> Ticket.analysis_changeset(result)
-    |> Repo.update()
-  end
-
-  defp run_matching(ticket) do
-    result = Matcher.match(ticket.from_email)
-
-    ticket
-    |> Ticket.matching_changeset(result)
-    |> Repo.update()
-  end
-
-  defp run_triage(ticket) do
-    decision = Triage.decide(ticket)
-
-    attrs = %{
-      status: decision.status,
-      queue: decision.queue,
-      priority: decision.priority,
-      routing_reason: decision.reason
-    }
-
-    with {:ok, ticket} <- ticket |> Ticket.triage_changeset(attrs) |> Repo.update() do
-      perform_side_effect(ticket, decision)
-      {:ok, ticket}
-    end
-  end
-
-  # Side effects live here for now. In a bigger app these would enqueue a
-  # Slack notification, send an auto-reply email, or push into a routing
-  # queue — kept as log lines to keep this project dependency-free.
-  defp perform_side_effect(ticket, %{status: :escalated}) do
-    Logger.info(
-      "[escalate] ticket=#{ticket.id} queue=#{ticket.queue} priority=#{ticket.priority} reason=#{ticket.routing_reason}"
-    )
-  end
-
-  defp perform_side_effect(ticket, %{status: :auto_resolved}) do
-    Logger.info(
-      "[auto_resolve] ticket=#{ticket.id} queue=#{ticket.queue} reason=#{ticket.routing_reason}"
-    )
-  end
-
-  defp perform_side_effect(ticket, %{status: :routed}) do
-    Logger.info(
-      "[route] ticket=#{ticket.id} queue=#{ticket.queue} priority=#{ticket.priority} reason=#{ticket.routing_reason}"
-    )
-  end
-
-  defp perform_side_effect(_ticket, _decision), do: :ok
-
-  defp mark_failed(ticket) do
-    ticket
-    |> Ticket.failed_changeset()
     |> Repo.update()
   end
 end

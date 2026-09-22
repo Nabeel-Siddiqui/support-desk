@@ -17,4 +17,10 @@ defmodule SupportDeskWeb.HomeLiveTest do
     assert html =~ "Total"
     assert html =~ "Resolved"
   end
+
+  test "requires basic auth", %{conn: conn} do
+    conn = Plug.Conn.delete_req_header(conn, "authorization")
+    conn = get(conn, ~p"/")
+    assert conn.status == 401
+  end
 end

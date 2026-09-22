@@ -33,6 +33,14 @@ defmodule SupportDeskWeb.ConnCase do
 
   setup tags do
     SupportDesk.DataCase.setup_sandbox(tags)
-    {:ok, conn: Phoenix.ConnTest.build_conn()}
+
+    admin_auth = Application.fetch_env!(:support_desk, :admin_auth)
+    auth_header = Plug.BasicAuth.encode_basic_auth(admin_auth[:username], admin_auth[:password])
+
+    conn =
+      Phoenix.ConnTest.build_conn()
+      |> Plug.Conn.put_req_header("authorization", auth_header)
+
+    {:ok, conn: conn}
   end
 end

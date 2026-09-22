@@ -35,3 +35,6 @@ config :phoenix, :plug_init_mode, :runtime
 # Enable helpful, but potentially expensive runtime checks
 config :phoenix_live_view,
   enable_expensive_runtime_checks: true
+
+config :support_desk, :webhook_secret, "test-webhook-secret"
+config :support_desk, :admin_auth, username: "test-admin", password: "test-password"

@@ -65,6 +65,13 @@ config :support_desk, SupportDeskWeb.Endpoint,
 # Enable dev routes for dashboard and mailbox
 config :support_desk, dev_routes: true
 
+# Shared secret the inbound webhook must present (x-webhook-secret header).
+# Required in every env (see config/runtime.exs for the prod requirement).
+config :support_desk, :webhook_secret, "dev-webhook-secret"
+
+# HTTP Basic Auth in front of the whole browser UI (it's an internal tool).
+config :support_desk, :admin_auth, username: "admin", password: "admin"
+
 # Do not include metadata nor timestamps in development logs
 config :logger, :console, format: "[$level] $message\n"
 

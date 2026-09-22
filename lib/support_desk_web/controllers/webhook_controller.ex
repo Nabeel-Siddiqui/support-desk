@@ -4,31 +4,51 @@ defmodule SupportDeskWeb.WebhookController do
   require Logger
 
   alias SupportDesk.Tickets
+  alias SupportDesk.Tickets.Ticket
 
   @doc """
   Receives an inbound message payload (`from`, `subject`, `text`/`html`,
   `message_id`), normalizes it into ticket intake attrs, and kicks off the
   ticket pipeline without blocking the response.
 
-  Runs the pipeline in a detached `Task` so the webhook always gets an
-  instant 200 (senders like this, and it avoids holding a connection open
-  through an AI call + DB writes). This is where Oban would go instead, so
-  a crashed run gets retried rather than silently dropped.
+  A malformed payload (missing/unparseable sender, for example) is rejected
+  synchronously with a 422 so the sender's retry logic actually finds out —
+  we validate before accepting, since a fire-and-forget background job can't
+  tell anyone it failed. A well-formed payload gets processed in a detached
+  `Task` so the webhook still returns instantly (senders expect this, and it
+  avoids holding the connection open through an AI call + several DB
+  writes). This is where Oban would go instead, so a crashed run gets
+  retried rather than silently dropped.
   """
   def inbound(conn, params) do
     attrs = normalize(params)
+    changeset = Tickets.change_new_ticket(%Ticket{}, attrs)
 
-    Task.Supervisor.start_child(SupportDesk.TaskSupervisor, fn ->
-      case Tickets.receive(attrs) do
-        {:ok, _ticket_or_duplicate} ->
-          :ok
+    if changeset.valid? do
+      Task.Supervisor.start_child(SupportDesk.TaskSupervisor, fn ->
+        case Tickets.receive(attrs) do
+          {:ok, _ticket_or_duplicate} ->
+            :ok
 
-        {:error, reason} ->
-          Logger.error("Webhook ticket pipeline failed: #{inspect(reason)}")
-      end
-    end)
+          {:error, reason} ->
+            Logger.error("webhook ticket pipeline failed",
+              from_email: attrs.from_email,
+              external_id: attrs.external_id,
+              reason: inspect(reason)
+            )
+        end
+      end)
 
-    send_resp(conn, 200, "")
+      send_resp(conn, 200, "")
+    else
+      conn
+      |> put_status(:unprocessable_entity)
+      |> json(%{errors: changeset_errors(changeset)})
+    end
+  end
+
+  defp changeset_errors(changeset) do
+    Ecto.Changeset.traverse_errors(changeset, &SupportDeskWeb.CoreComponents.translate_error/1)
   end
 
   defp normalize(params) do

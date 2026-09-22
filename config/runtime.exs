@@ -53,6 +53,37 @@ if config_env() == :prod do
 
   config :support_desk, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
+  webhook_secret =
+    System.get_env("WEBHOOK_SECRET") ||
+      raise """
+      environment variable WEBHOOK_SECRET is missing.
+      This authenticates inbound webhook deliveries (x-webhook-secret header) —
+      generate one with: mix phx.gen.secret 32
+      """
+
+  config :support_desk, :webhook_secret, webhook_secret
+
+  admin_username =
+    System.get_env("ADMIN_USERNAME") ||
+      raise "environment variable ADMIN_USERNAME is missing (gates the ticket UI)"
+
+  admin_password =
+    System.get_env("ADMIN_PASSWORD") ||
+      raise "environment variable ADMIN_PASSWORD is missing (gates the ticket UI)"
+
+  config :support_desk, :admin_auth, username: admin_username, password: admin_password
+
+  ai_enabled? = System.get_env("AI_ENABLED") in ~w(true 1)
+
+  if ai_enabled? and !System.get_env("ANTHROPIC_API_KEY") do
+    raise """
+    AI_ENABLED is set but ANTHROPIC_API_KEY is missing. Either set the API key
+    or leave AI_ENABLED unset to run on the deterministic keyword fallback.
+    """
+  end
+
+  config :support_desk, ai_enabled: ai_enabled?
+
   config :support_desk, SupportDeskWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],
     http: [
