@@ -48,11 +48,3 @@ config :support_desk, :crm_accounts, %{
     an `Ecto.Multi` atomicity test for the pipeline
     (`test/support_desk/tickets/pipeline_test.exs`), webhook auth/validation
     tests, and LiveView tests driving the actual ticket CRUD/resolve UI.
-
-## Learn more
-
-  * Official website: https://www.phoenixframework.org/
-  * Guides: https://hexdocs.pm/phoenix/overview.html
-  * Docs: https://hexdocs.pm/phoenix
-  * Forum: https://elixirforum.com/c/phoenix-forum
-  * Source: https://github.com/phoenixframework/phoenix

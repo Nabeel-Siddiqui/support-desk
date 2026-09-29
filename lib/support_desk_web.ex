@@ -43,7 +43,7 @@ defmodule SupportDeskWeb do
         layouts: [html: SupportDeskWeb.Layouts]
 
       import Plug.Conn
-      import SupportDeskWeb.Gettext
+      use Gettext, backend: SupportDeskWeb.Gettext
 
       unquote(verified_routes())
     end
@@ -85,7 +85,7 @@ defmodule SupportDeskWeb do
       import Phoenix.HTML
       # Core UI components and translation
       import SupportDeskWeb.CoreComponents
-      import SupportDeskWeb.Gettext
+      use Gettext, backend: SupportDeskWeb.Gettext
 
       # Shortcut for generating JS commands
       alias Phoenix.LiveView.JS
