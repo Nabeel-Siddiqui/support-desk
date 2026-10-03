@@ -101,14 +101,12 @@ defmodule SupportDeskWeb.TicketLive.Index do
   end
 
   defp status_options do
-    [{"All statuses", ""} | Enum.map(Ecto.Enum.values(Ticket, :status), &{humanize(&1), &1})]
+    [{"All statuses", ""} | Ticket.status_options()]
   end
 
   defp status_selected?(nil, ""), do: true
   defp status_selected?(_current, ""), do: false
   defp status_selected?(current, value), do: current == value
-
-  defp humanize(atom), do: atom |> to_string() |> String.replace("_", " ") |> String.capitalize()
 
   @impl true
   def render(assigns) do
@@ -174,7 +172,7 @@ defmodule SupportDeskWeb.TicketLive.Index do
         <.link patch={~p"/tickets/#{t}/edit"}>Edit</.link>
       </:action>
       <:action :let={{_id, t}}>
-        <.link :if={resolvable?(t)} phx-click="resolve" phx-value-id={t.id}>
+        <.link :if={Ticket.resolvable?(t)} phx-click="resolve" phx-value-id={t.id}>
           Resolve
         </.link>
         <.link :if={t.status == :resolved} phx-click="reopen" phx-value-id={t.id}>
@@ -254,8 +252,6 @@ defmodule SupportDeskWeb.TicketLive.Index do
   def handle_info({SupportDeskWeb.TicketLive.FormComponent, {:saved, _ticket}}, socket) do
     {:noreply, load_tickets(socket, socket.assigns.filters)}
   end
-
-  defp resolvable?(t), do: t.status not in [:resolved, :failed]
 
   defp status_badge_class(status) when status in [:escalated, :failed],
     do: "text-red-700 font-semibold"

@@ -2,23 +2,9 @@ defmodule SupportDeskWeb.TicketLiveTest do
   use SupportDeskWeb.ConnCase
 
   import Phoenix.LiveViewTest
+  import SupportDesk.TicketsFixtures
 
   alias SupportDesk.Tickets
-
-  defp ticket_fixture(attrs \\ %{}) do
-    {:ok, ticket} =
-      attrs
-      |> Enum.into(%{
-        channel: "email",
-        from_email: "fixture@example.com",
-        from_name: "Fixture Customer",
-        subject: "Original subject",
-        body: "Original body"
-      })
-      |> Tickets.create()
-
-    ticket
-  end
 
   defp valid_new_attrs do
     %{

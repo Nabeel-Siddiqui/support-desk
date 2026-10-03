@@ -2,6 +2,7 @@ defmodule SupportDeskWeb.TicketLive.Show do
   use SupportDeskWeb, :live_view
 
   alias SupportDesk.Tickets
+  alias SupportDesk.Tickets.Ticket
 
   @impl true
   def mount(_params, _session, socket) do
@@ -29,7 +30,7 @@ defmodule SupportDeskWeb.TicketLive.Show do
         <.link patch={~p"/tickets/#{@ticket}/show/edit"}>
           <.button>Edit</.button>
         </.link>
-        <.button :if={resolvable?(@ticket)} phx-click="resolve">Resolve</.button>
+        <.button :if={Ticket.resolvable?(@ticket)} phx-click="resolve">Resolve</.button>
         <.button :if={@ticket.status == :resolved} phx-click="reopen">Reopen</.button>
         <.button
           phx-click="delete"
@@ -118,6 +119,4 @@ defmodule SupportDeskWeb.TicketLive.Show do
      |> put_flash(:info, "Ticket deleted")
      |> push_navigate(to: ~p"/tickets")}
   end
-
-  defp resolvable?(t), do: t.status not in [:resolved, :failed]
 end

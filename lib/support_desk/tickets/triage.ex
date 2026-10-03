@@ -11,16 +11,6 @@ defmodule SupportDesk.Tickets.Triage do
   @self_serve_intents ["how_to", "account_access"]
   @high_value_tiers ["enterprise", "pro"]
 
-  @rules [
-    :spam,
-    :unhappy_high_value_customer,
-    :critical_urgency,
-    :very_negative,
-    :billing_related,
-    :confident_self_serve,
-    :default_route
-  ]
-
   @doc """
   Runs the ordered rules against a ticket-shaped map (expects `:intent`,
   `:sentiment`, `:urgency`, `:ai_confidence`, `:known_customer`,
@@ -28,7 +18,17 @@ defmodule SupportDesk.Tickets.Triage do
   `%{status:, queue:, priority:, reason:}`.
   """
   def decide(ticket) do
-    Enum.find_value(@rules, &apply(__MODULE__, &1, [ticket]))
+    rules = [
+      &spam/1,
+      &unhappy_high_value_customer/1,
+      &critical_urgency/1,
+      &very_negative/1,
+      &billing_related/1,
+      &confident_self_serve/1,
+      &default_route/1
+    ]
+
+    Enum.find_value(rules, & &1.(ticket))
   end
 
   def spam(%{intent: "spam"}) do

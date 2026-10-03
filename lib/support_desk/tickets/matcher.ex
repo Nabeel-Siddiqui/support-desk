@@ -30,7 +30,6 @@ defmodule SupportDesk.Tickets.Matcher do
       lookup_fun when is_function(lookup_fun, 1) ->
         case lookup_fun.(email) do
           %{id: id} -> id
-          nil -> nil
           _ -> nil
         end
     end

@@ -111,8 +111,5 @@ defmodule SupportDeskWeb.TicketLive.FormComponent do
 
   defp notify_parent(msg), do: send(self(), {__MODULE__, msg})
 
-  defp status_options do
-    Ecto.Enum.values(Ticket, :status)
-    |> Enum.map(&{&1 |> to_string() |> String.replace("_", " ") |> String.capitalize(), &1})
-  end
+  defp status_options, do: Ticket.status_options()
 end

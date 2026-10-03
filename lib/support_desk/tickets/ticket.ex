@@ -66,9 +66,7 @@ defmodule SupportDesk.Tickets.Ticket do
   def intake_changeset(ticket, attrs) do
     ticket
     |> cast(attrs, @intake_fields)
-    |> validate_required([:channel, :from_email])
-    |> validate_format(:from_email, @email_regex, message: "must be a valid email address")
-    |> unique_constraint(:external_id)
+    |> validate_intake_fields()
   end
 
   @doc "Full manual edit: intake fields plus the human-editable triage fields."
@@ -76,6 +74,11 @@ defmodule SupportDesk.Tickets.Ticket do
   def edit_changeset(ticket, attrs) do
     ticket
     |> cast(attrs, @intake_fields ++ @triage_fields)
+    |> validate_intake_fields()
+  end
+
+  defp validate_intake_fields(changeset) do
+    changeset
     |> validate_required([:channel, :from_email])
     |> validate_format(:from_email, @email_regex, message: "must be a valid email address")
     |> unique_constraint(:external_id)
@@ -92,4 +95,17 @@ defmodule SupportDesk.Tickets.Ticket do
 
   @spec failed_changeset(t()) :: Ecto.Changeset.t()
   def failed_changeset(ticket), do: change(ticket, status: :failed)
+
+  @doc "Whether `ticket` is still open to being resolved (not already resolved or failed)."
+  @spec resolvable?(t()) :: boolean()
+  def resolvable?(%__MODULE__{status: status}), do: status not in [:resolved, :failed]
+
+  @doc "Every status as a `{humanized label, value}` pair, for a select input."
+  @spec status_options() :: [{String.t(), atom()}]
+  def status_options do
+    Enum.map(@statuses, &{humanize_status(&1), &1})
+  end
+
+  defp humanize_status(status),
+    do: status |> to_string() |> String.replace("_", " ") |> String.capitalize()
 end

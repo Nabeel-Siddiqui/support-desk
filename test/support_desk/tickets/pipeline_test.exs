@@ -1,22 +1,10 @@
 defmodule SupportDesk.Tickets.PipelineTest do
   use SupportDesk.DataCase, async: true
 
+  import SupportDesk.TicketsFixtures
+
   alias SupportDesk.Tickets
   alias SupportDesk.Tickets.{Pipeline, Ticket}
-
-  defp ticket_fixture(attrs \\ %{}) do
-    {:ok, ticket} =
-      attrs
-      |> Enum.into(%{
-        channel: "email",
-        from_email: "customer@example.com",
-        subject: "I want a refund",
-        body: "Please refund my last order, I want to cancel."
-      })
-      |> Tickets.create()
-
-    ticket
-  end
 
   describe "process/1" do
     test "commits analysis, matching, and triage results together" do

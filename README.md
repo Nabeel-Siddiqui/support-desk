@@ -44,7 +44,7 @@ config :support_desk, :crm_accounts, %{
 ## Testing
 
   * `mix test` runs everything: DB-free unit tests for the AI
-    fallback/matcher/triage rules (`test/support_desk/tickets_pipeline_test.exs`),
+    fallback/matcher/triage rules (`test/support_desk/tickets/{ai,matcher,triage}_test.exs`),
     an `Ecto.Multi` atomicity test for the pipeline
     (`test/support_desk/tickets/pipeline_test.exs`), webhook auth/validation
     tests, and LiveView tests driving the actual ticket CRUD/resolve UI.
