@@ -180,6 +180,19 @@ defmodule SupportDesk.Tickets.AI do
   ]
   @feature_words ["feature request", "suggestion", "would be nice", "wish there was"]
 
+  # Checked in this order — first match wins, same as the cond it replaces.
+  @intent_word_groups [
+    {@spam_words, "spam"},
+    {@refund_words, "refund"},
+    {@cancellation_words, "cancellation"},
+    {@billing_words, "billing"},
+    {@account_words, "account_access"},
+    {@bug_words, "bug_report"},
+    {@how_to_words, "how_to"},
+    {@feature_words, "feature_request"},
+    {["complain", "complaint"], "complaint"}
+  ]
+
   @very_negative_words ~w(furious outraged unacceptable disgusted terrible awful worst scam fraud)
   @negative_words ~w(frustrated annoyed disappointed unhappy upset angry)
   @positive_words ["thanks", "thank you", "great", "awesome", "love", "appreciate", "happy"]
@@ -205,18 +218,9 @@ defmodule SupportDesk.Tickets.AI do
   end
 
   defp detect_intent(text) do
-    cond do
-      contains_any?(text, @spam_words) -> "spam"
-      contains_any?(text, @refund_words) -> "refund"
-      contains_any?(text, @cancellation_words) -> "cancellation"
-      contains_any?(text, @billing_words) -> "billing"
-      contains_any?(text, @account_words) -> "account_access"
-      contains_any?(text, @bug_words) -> "bug_report"
-      contains_any?(text, @how_to_words) -> "how_to"
-      contains_any?(text, @feature_words) -> "feature_request"
-      contains_any?(text, ["complain", "complaint"]) -> "complaint"
-      true -> "other"
-    end
+    Enum.find_value(@intent_word_groups, "other", fn {words, intent} ->
+      if contains_any?(text, words), do: intent
+    end)
   end
 
   defp detect_sentiment(text) do

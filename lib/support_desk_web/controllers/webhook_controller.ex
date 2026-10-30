@@ -25,25 +25,30 @@ defmodule SupportDeskWeb.WebhookController do
     changeset = Tickets.change_new_ticket(%Ticket{}, attrs)
 
     if changeset.valid? do
-      Task.Supervisor.start_child(SupportDesk.TaskSupervisor, fn ->
-        case Tickets.receive(attrs) do
-          {:ok, _ticket_or_duplicate} ->
-            :ok
-
-          {:error, reason} ->
-            Logger.error("webhook ticket pipeline failed",
-              from_email: attrs.from_email,
-              external_id: attrs.external_id,
-              reason: inspect(reason)
-            )
-        end
-      end)
-
+      start_pipeline(attrs)
       send_resp(conn, 200, "")
     else
       conn
       |> put_status(:unprocessable_entity)
       |> json(%{errors: changeset_errors(changeset)})
+    end
+  end
+
+  defp start_pipeline(attrs) do
+    Task.Supervisor.start_child(SupportDesk.TaskSupervisor, fn -> run_pipeline(attrs) end)
+  end
+
+  defp run_pipeline(attrs) do
+    case Tickets.receive(attrs) do
+      {:ok, _ticket_or_duplicate} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.error("webhook ticket pipeline failed",
+          from_email: attrs.from_email,
+          external_id: attrs.external_id,
+          reason: inspect(reason)
+        )
     end
   end
 

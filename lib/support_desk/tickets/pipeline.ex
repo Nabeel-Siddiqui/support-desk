@@ -29,7 +29,7 @@ defmodule SupportDesk.Tickets.Pipeline do
 
   alias Ecto.Multi
   alias SupportDesk.Repo
-  alias SupportDesk.Tickets.{AI, Matcher, Triage, Ticket}
+  alias SupportDesk.Tickets.{AI, Matcher, Ticket, Triage}
 
   @doc """
   Runs a ticket through analyze -> match -> triage, committing all three
