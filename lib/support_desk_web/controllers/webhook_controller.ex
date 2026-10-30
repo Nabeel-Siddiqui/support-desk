@@ -1,55 +1,39 @@
 defmodule SupportDeskWeb.WebhookController do
   use SupportDeskWeb, :controller
 
-  require Logger
-
   alias SupportDesk.Tickets
   alias SupportDesk.Tickets.Ticket
 
   @doc """
   Receives an inbound message payload (`from`, `subject`, `text`/`html`,
-  `message_id`), normalizes it into ticket intake attrs, and kicks off the
-  ticket pipeline without blocking the response.
+  `message_id`), normalizes it into ticket intake attrs, and creates the
+  ticket.
 
-  A malformed payload (missing/unparseable sender, for example) is rejected
-  synchronously with a 422 so the sender's retry logic actually finds out —
-  we validate before accepting, since a fire-and-forget background job can't
-  tell anyone it failed. A well-formed payload gets processed in a detached
-  `Task` so the webhook still returns instantly (senders expect this, and it
-  avoids holding the connection open through an AI call + several DB
-  writes). This is where Oban would go instead, so a crashed run gets
-  retried rather than silently dropped.
+  A malformed payload (missing/unparseable sender, for example) is
+  rejected with a 422 so the sender's retry logic actually finds out.
+  A well-formed one is saved and its processing job enqueued in one
+  transaction (see `Pipeline.receive/1`), which is fast enough —
+  milliseconds, not however long the AI call takes — to do inline and
+  still answer instantly; the slow analyze -> match -> triage pipeline
+  itself runs via `ProcessTicketWorker` (Oban), not on this request.
   """
   def inbound(conn, params) do
     attrs = normalize(params)
-    changeset = Tickets.change_new_ticket(%Ticket{}, attrs)
 
-    if changeset.valid? do
-      start_pipeline(attrs)
+    with {:ok, _changeset} <- validate(attrs),
+         {:ok, _ticket_or_duplicate} <- Tickets.receive(attrs) do
       send_resp(conn, 200, "")
     else
-      conn
-      |> put_status(:unprocessable_entity)
-      |> json(%{errors: changeset_errors(changeset)})
+      {:error, changeset} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{errors: changeset_errors(changeset)})
     end
   end
 
-  defp start_pipeline(attrs) do
-    Task.Supervisor.start_child(SupportDesk.TaskSupervisor, fn -> run_pipeline(attrs) end)
-  end
-
-  defp run_pipeline(attrs) do
-    case Tickets.receive(attrs) do
-      {:ok, _ticket_or_duplicate} ->
-        :ok
-
-      {:error, reason} ->
-        Logger.error("webhook ticket pipeline failed",
-          from_email: attrs.from_email,
-          external_id: attrs.external_id,
-          reason: inspect(reason)
-        )
-    end
+  defp validate(attrs) do
+    changeset = Tickets.change_new_ticket(%Ticket{}, attrs)
+    if changeset.valid?, do: {:ok, changeset}, else: {:error, changeset}
   end
 
   defp changeset_errors(changeset) do

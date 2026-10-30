@@ -42,11 +42,14 @@ the work" is exactly that shape.
   checked out from the pool is how one degraded dependency exhausts
   capacity for every other request.
   [ADR 1](docs/decisions/0001-ai-call-outside-the-transaction.md)
-- **The webhook validates synchronously, then processes fire-and-forget.**
-  A malformed payload gets a real 422 the sender's own retry logic can
-  act on; a valid one gets accepted instantly while the actual pipeline
-  runs in a detached task.
-  [ADR 2](docs/decisions/0002-fire-and-forget-not-a-retry-queue.md)
+- **The webhook validates synchronously, then enqueues for processing —
+  ticket and job in one transaction.** A malformed payload gets a real
+  422 the sender's own retry logic can act on; a valid one is saved and
+  queued in one atomic write, fast enough to do inline, while the slow
+  analyze -> match -> triage pipeline runs via Oban, not on the
+  sender's connection.
+  [ADR 2](docs/decisions/0002-fire-and-forget-not-a-retry-queue.md) ·
+  [ADR 4](docs/decisions/0004-oban-replaces-the-fire-and-forget-task.md)
 - **The deterministic keyword fallback is the default, not a degraded
   mode.** It's the path every test — and every fresh clone with no API
   key — actually exercises, so it's held to the same bar as the real AI
@@ -60,24 +63,30 @@ The path from a received webhook to a routed ticket:
 ```mermaid
 graph LR
     Sender["Webhook sender"] -->|"POST /webhooks/inbound"| Controller["WebhookController<br/>validates synchronously"]
-    Controller -->|"202-style instant 200"| Sender
-    Controller -->|"detached Task"| Pipeline["Pipeline.process/1"]
+    Controller --> Multi["Ecto.Multi<br/>insert ticket + enqueue job,<br/>one transaction"]
+    Multi -->|"instant 200"| Sender
+    Multi --> Worker["ProcessTicketWorker<br/>(Oban, :tickets queue)"]
+    Worker --> Pipeline["Pipeline.process/1"]
     Pipeline --> AI["AI.analyze/1<br/>Claude, or keyword fallback"]
     Pipeline --> Matcher["Matcher.match/1<br/>CRM/user lookup"]
     AI --> Triage["Triage.decide/1<br/>ordered rules, first match wins"]
     Matcher --> Triage
-    Triage --> Multi["Ecto.Multi<br/>analysis + matching + triage,<br/>one transaction"]
+    Triage --> ResultMulti["Ecto.Multi<br/>analysis + matching + triage,<br/>one transaction"]
 ```
 
-If the pipeline raises anywhere after the ticket is saved, `Pipeline.process/1`
-catches it, logs the exception, and marks the ticket `:failed` instead of
-crashing — see `lib/support_desk/tickets/pipeline.ex` for the full design
-notes on transaction boundaries and failure modes.
+If the pipeline raises anywhere after the ticket is saved,
+`Pipeline.process/1` catches it, logs the exception, and marks the
+ticket `:failed` instead of crashing — see
+`lib/support_desk/tickets/pipeline.ex` for the full design notes on
+transaction boundaries and failure modes. A crash Oban's own retry
+can catch (the worker process itself dying, not just an AI-call
+failure `process/1` already handles) gets retried, up to 5 attempts.
 
 ## Tech stack
 
-Phoenix 1.7 + LiveView · Ecto/Postgres · Req (Claude API client) ·
-Credo (`--strict`) + Dialyzer in CI · GitHub Actions.
+Phoenix 1.7 + LiveView · Ecto/Postgres · Oban (ticket processing) ·
+Req (Claude API client) · Credo (`--strict`) + Dialyzer in CI ·
+GitHub Actions.
 
 ## Running it locally
 
@@ -99,7 +108,7 @@ if you need individual attribution later.
 To check the whole thing end to end:
 
 ```bash
-mix test                # 63 tests, no real network calls
+mix test                # 66 tests, no real network calls
 mix credo --strict
 mix dialyzer
 ```
@@ -129,13 +138,14 @@ config :support_desk, :crm_accounts, %{
 
 ## Design decisions
 
-Three of the less-obvious calls are written up in
+Four of the less-obvious calls are written up in
 [`docs/decisions/`](docs/decisions/), each with the alternative
 considered and why it lost:
 
 1. [The AI call happens before the transaction, never inside it](docs/decisions/0001-ai-call-outside-the-transaction.md)
-2. [The webhook validates synchronously, then processes fire-and-forget](docs/decisions/0002-fire-and-forget-not-a-retry-queue.md)
+2. [The webhook validates synchronously, then processes fire-and-forget](docs/decisions/0002-fire-and-forget-not-a-retry-queue.md) (superseded by 4)
 3. [The deterministic keyword fallback is the default, not a degraded mode](docs/decisions/0003-ai-fallback-is-the-default.md)
+4. [Oban replaces the fire-and-forget Task](docs/decisions/0004-oban-replaces-the-fire-and-forget-task.md)
 
 `CLAUDE.md` in the repo root has the conventions this app holds to
 (contexts own all business logic, the web layer never touches `Repo`
@@ -144,11 +154,6 @@ ever makes a real network call).
 
 ## What I'd do next
 
-- **Oban instead of a bare `Task` for pipeline processing.** The
-  webhook's fire-and-forget `Task` (see
-  [ADR 2](docs/decisions/0002-fire-and-forget-not-a-retry-queue.md))
-  has no retry: a crash mid-pipeline after the ticket is saved is lost,
-  not requeued. This is the single highest-value next step.
 - **Rule precedence as data, not code order.** `Triage.decide/1`'s
   rules are an ordered list of functions — readable at this size, but
   explicit priorities (like the "rule precedence" idea in Tally's own
@@ -156,7 +161,7 @@ ever makes a real network call).
 - **Per-user accounts for the ticket dashboard.** Basic Auth is
   deliberately simple for a single-admin internal tool; real per-user
   attribution (who resolved what) would need `mix phx.gen.auth`.
-- **A real multi-node run.** The detached `Task` and the pipeline don't
-  share any node-local state, so they should already work across
-  multiple nodes — but, like the rest of this series, that's only ever
+- **A real multi-node run.** Oban and the pipeline don't share any
+  node-local state, so they should already work across multiple
+  nodes — but, like the rest of this series, that's only ever
   actually run as one node so far.

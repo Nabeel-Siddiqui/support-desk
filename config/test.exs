@@ -38,3 +38,8 @@ config :phoenix_live_view,
 
 config :support_desk, :webhook_secret, "test-webhook-secret"
 config :support_desk, :admin_auth, username: "test-admin", password: "test-password"
+
+# Oban.Testing's :manual mode — jobs are inserted into the database (so
+# uniqueness/argument assertions still work) but never picked up by a
+# real queue. Tests trigger perform/1 explicitly via Oban.Testing.
+config :support_desk, Oban, testing: :manual

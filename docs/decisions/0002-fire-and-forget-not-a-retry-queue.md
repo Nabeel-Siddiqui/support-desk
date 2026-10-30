@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted (initial build).
+Superseded by [ADR 4](0004-oban-replaces-the-fire-and-forget-task.md), which replaces the
+bare `Task` with Oban. Kept here, unedited, because the reasoning for
+validating synchronously before accepting still holds — only the "no
+retry queue" half of this decision changed.
 
 ## Context
 

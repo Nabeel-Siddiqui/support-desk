@@ -13,6 +13,9 @@ speculatively.
   Contexts are the only modules that touch `Repo`.
 - **The web layer (controllers, LiveViews) never calls `Repo` directly**
   and never builds `Ecto.Query`s itself — it calls context functions.
+- Oban workers call context functions too; they don't reach into `Repo`
+  directly. `ProcessTicketWorker` is a thin shell around
+  `Tickets.process/1`.
 - **The AI call and any external lookup happen before a database
   transaction opens, never inside one.** Holding a DB connection checked
   out from the pool across a slow network call is how one flaky external

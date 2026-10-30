@@ -1,10 +1,11 @@
 defmodule SupportDesk.Tickets.PipelineTest do
   use SupportDesk.DataCase, async: true
+  use Oban.Testing, repo: SupportDesk.Repo
 
   import SupportDesk.TicketsFixtures
 
   alias SupportDesk.Tickets
-  alias SupportDesk.Tickets.{Pipeline, Ticket}
+  alias SupportDesk.Tickets.{Pipeline, ProcessTicketWorker, Ticket}
 
   describe "process/1" do
     test "commits analysis, matching, and triage results together" do
@@ -51,7 +52,7 @@ defmodule SupportDesk.Tickets.PipelineTest do
   end
 
   describe "receive/1" do
-    test "creates and processes a new ticket" do
+    test "creates the ticket and enqueues it for processing, without processing it inline" do
       assert {:ok, %Ticket{} = ticket} =
                Pipeline.receive(%{
                  channel: "email",
@@ -61,8 +62,25 @@ defmodule SupportDesk.Tickets.PipelineTest do
                  body: "How do I reset my password?"
                })
 
-      assert ticket.status != :new
+      assert ticket.status == :new
       assert ticket.external_id == "msg-1"
+      assert_enqueued(worker: ProcessTicketWorker, args: %{ticket_id: ticket.id})
+    end
+
+    test "the enqueued job actually processes the ticket once run" do
+      {:ok, ticket} =
+        Pipeline.receive(%{
+          channel: "email",
+          external_id: "msg-2",
+          from_email: "new2@example.com",
+          subject: "How do I reset my password?",
+          body: "How do I reset my password?"
+        })
+
+      assert :ok = perform_job(ProcessTicketWorker, %{ticket_id: ticket.id})
+
+      processed = Tickets.get_ticket!(ticket.id)
+      assert processed.status != :new
     end
 
     test "treats a redelivered external_id as success instead of an error" do

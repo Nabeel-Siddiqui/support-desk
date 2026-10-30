@@ -74,6 +74,14 @@ config :logger, :console,
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
 
+# The "tickets" queue runs the analyze -> match -> triage pipeline for
+# every ticket the webhook receives (see ADR 4). One queue is enough —
+# there's no second kind of background job in this app yet.
+config :support_desk, Oban,
+  engine: Oban.Engines.Basic,
+  repo: SupportDesk.Repo,
+  queues: [tickets: 10]
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"

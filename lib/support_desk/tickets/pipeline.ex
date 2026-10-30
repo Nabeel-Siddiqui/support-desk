@@ -17,19 +17,21 @@ defmodule SupportDesk.Tickets.Pipeline do
       immediate, uncommitted-with-anything-else write, so the ticket
       dashboard shows "processing" while the (possibly multi-second) AI
       call is in flight, instead of looking untouched.
-    * If the worker literally dies mid-pipeline (OOM, node restart) after
-      `mark_processing/1` but before the final commit, the ticket is left
-      showing :processing indefinitely. There's no retry queue in this
-      app (see the webhook controller for why), so that's a visible,
-      honest failure mode rather than a silent one — a stale :processing
-      row is a legible signal to whoever's looking at the dashboard.
+    * `process/1` itself is called from `ProcessTicketWorker` (Oban), not
+      run inline on the webhook's own request — see
+      [ADR 4](../../../docs/decisions/0004-oban-replaces-the-fire-and-forget-task.md).
+      If the worker process dies mid-pipeline (OOM, node restart) after
+      `mark_processing/1` but before the final commit, Oban retries the
+      job rather than leaving the ticket stuck showing :processing
+      forever — re-running `mark_processing/1` on a ticket already
+      `:processing` is a harmless no-op update.
   """
 
   require Logger
 
   alias Ecto.Multi
   alias SupportDesk.Repo
-  alias SupportDesk.Tickets.{AI, Matcher, Ticket, Triage}
+  alias SupportDesk.Tickets.{AI, Matcher, ProcessTicketWorker, Ticket, Triage}
 
   @doc """
   Runs a ticket through analyze -> match -> triage, committing all three
@@ -52,19 +54,29 @@ defmodule SupportDesk.Tickets.Pipeline do
   end
 
   @doc """
-  Creates a ticket from a webhook payload and immediately processes it. A
-  duplicate `external_id` (the webhook redelivering the same message) is
-  treated as success rather than an error, since the caller (an at-least-once
-  webhook sender) shouldn't be punished for retrying a delivery we already
-  handled.
+  Creates a ticket from a webhook payload and enqueues it for processing
+  — the ticket row and its `ProcessTicketWorker` job are written in one
+  transaction, so a job can never be missing for a ticket that exists
+  (or vice versa). A duplicate `external_id` (the webhook redelivering
+  the same message) is treated as success rather than an error, since
+  the caller (an at-least-once webhook sender) shouldn't be punished
+  for retrying a delivery we already handled.
   """
   @spec receive(map()) :: {:ok, Ticket.t() | :duplicate} | {:error, Ecto.Changeset.t()}
   def receive(attrs) do
-    case %Ticket{} |> Ticket.intake_changeset(attrs) |> Repo.insert() do
-      {:ok, ticket} ->
-        process(ticket)
+    changeset = Ticket.intake_changeset(%Ticket{}, attrs)
 
-      {:error, changeset} ->
+    Multi.new()
+    |> Multi.insert(:ticket, changeset)
+    |> Oban.insert(:process_job, fn %{ticket: ticket} ->
+      ProcessTicketWorker.new(%{ticket_id: ticket.id})
+    end)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{ticket: ticket}} ->
+        {:ok, ticket}
+
+      {:error, :ticket, changeset, _changes_so_far} ->
         if duplicate_external_id?(changeset) do
           {:ok, :duplicate}
         else

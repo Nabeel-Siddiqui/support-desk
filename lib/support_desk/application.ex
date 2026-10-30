@@ -14,8 +14,7 @@ defmodule SupportDesk.Application do
       {Phoenix.PubSub, name: SupportDesk.PubSub},
       # Start the Finch HTTP client for sending emails
       {Finch, name: SupportDesk.Finch},
-      # Runs the ticket pipeline out-of-band so webhook requests return instantly
-      {Task.Supervisor, name: SupportDesk.TaskSupervisor},
+      {Oban, Application.fetch_env!(:support_desk, Oban)},
       # Start a worker by calling: SupportDesk.Worker.start_link(arg)
       # {SupportDesk.Worker, arg},
       # Start to serve requests, typically the last entry

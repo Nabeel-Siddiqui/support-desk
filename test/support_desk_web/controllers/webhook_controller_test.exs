@@ -1,11 +1,9 @@
 defmodule SupportDeskWeb.WebhookControllerTest do
-  # async: false — the webhook handler processes the ticket in a spawned
-  # Task, which needs the Ecto sandbox connection shared across processes
-  # rather than pinned to the test process (see ConnCase/DataCase docs on
-  # testing code that spawns its own processes).
-  use SupportDeskWeb.ConnCase, async: false
+  use SupportDeskWeb.ConnCase, async: true
+  use Oban.Testing, repo: SupportDesk.Repo
 
   alias SupportDesk.Tickets
+  alias SupportDesk.Tickets.ProcessTicketWorker
 
   # The webhook endpoint is a separate trust boundary from the admin UI —
   # it authenticates via a shared secret header, not the browser's basic
@@ -46,7 +44,9 @@ defmodule SupportDeskWeb.WebhookControllerTest do
       assert %{"errors" => %{"from_email" => _}} = json_response(conn, 422)
     end
 
-    test "accepts a well-formed payload, returns instantly, and processes it", %{conn: conn} do
+    test "accepts a well-formed payload, returns instantly, and enqueues it for processing", %{
+      conn: conn
+    } do
       conn =
         conn
         |> webhook_conn()
@@ -61,14 +61,12 @@ defmodule SupportDeskWeb.WebhookControllerTest do
       assert conn.status == 200
       assert conn.resp_body == ""
 
-      # the Task is fire-and-forget; give it a moment to land
-      Process.sleep(50)
-
       ticket = Enum.find(Tickets.list_tickets(), &(&1.external_id == "webhook-msg-1"))
       assert ticket
       assert ticket.from_email == "jane@example.com"
       assert ticket.from_name == "Jane Doe"
-      assert ticket.status != :new
+      assert ticket.status == :new
+      assert_enqueued(worker: ProcessTicketWorker, args: %{ticket_id: ticket.id})
     end
   end
 end
